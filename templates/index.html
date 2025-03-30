@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Juego de UNO</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+
+<h1>Juego de UNO</h1>
+
+<div class="container" id="configuracionSala">
+    <h2>Configuración de la Sala</h2>
+    <label for="sala">Nombre de la Sala:</label>
+    <input type="text" id="sala" placeholder="Ingrese el nombre">
+    <button onclick="unirseSala()">Unirse</button>
+
+    <h3>Estás en la sala: <span id="salaActual"></span></h3>
+    <h3>Jugadores en la sala: <span id="jugadoresCount">0</span></h3>
+</div>
+
+<div class="container" id="partida" style="display:none;">
+    <h2>Turno del jugador: <span id="turnoJugador"></span></h2>
+    <div id="cartaInicial"></div>
+    <h2>Tus cartas:</h2>
+    <div id="cartas"></div>
+    <button onclick="salirSala()">Salir de la Sala</button>
+    <h3>Host del juego: <span id="hostJuego"></span></h3>
+</div>
+
+<div class="container" id="botonComenzar" style="display:none;">
+    <button id="comenzarBtn" onclick="comenzarJuego()">Comenzar Juego</button>
+</div>
+
+<script>
+   
+        var socket = io.connect("http://127.0.0.1:5000");
+        var id_jugador = localStorage.getItem("id_jugador") || Math.floor(Math.random() * 10000);
+        localStorage.setItem("id_jugador", id_jugador);
+        
+        function unirseSala() {
+            var sala = document.getElementById("sala").value;
+            if (!sala) {
+                alert("Debes ingresar una sala");
+                return;
+            }
+            localStorage.setItem("sala", sala);
+            document.getElementById("salaActual").innerText = sala;
+            socket.emit("unirse_sala", { id: id_jugador, nombre: "Jugador " + id_jugador, sala: sala });
+        }
+        
+       
+        function salirSala() {
+            var sala = localStorage.getItem("sala");
+            if (sala) {
+                socket.emit("salir_sala", { id: id_jugador, sala: sala });
+            }
+            localStorage.removeItem("sala");
+            localStorage.removeItem("juegoActivo");
+            localStorage.removeItem("turno");
+            localStorage.removeItem("host");
+            location.reload();
+        }
+       
+        socket.on("estado_actual", function(data) {
+            if (data.juegoActivo) {
+                localStorage.setItem("juegoActivo", "true");
+                localStorage.setItem("turno", data.turno);
+                localStorage.setItem("host", data.host);
+        
+                mostrarJuego();
+                actualizarEstado();
+                
+                if (data.carta_inicial) {
+                    mostrarCartaInicial(data.carta_inicial);
+                }
+            }
+        });
+        
+        
+        window.onload = function() {
+            var sala_guardada = localStorage.getItem("sala");
+            var juegoActivo = localStorage.getItem("juegoActivo");
+        
+            if (sala_guardada) {
+                socket.emit("unirse_sala", { id: id_jugador, nombre: "Jugador " + id_jugador, sala: sala_guardada });
+                socket.emit("obtener_estado", {sala: sala_guardada})
+            }
+        
+            if (juegoActivo === "true") {
+                mostrarJuego();
+                actualizarEstado();
+            }
+        };
+        
+        function actualizarEstado() {
+            var turno = localStorage.getItem("turno");
+            var host = localStorage.getItem("host");
+            if (turno) {
+                document.getElementById("turnoJugador").innerText = turno;
+            }
+            if (host) {
+                document.getElementById("hostJuego").innerText = host;
+            }
+        }
+
+        socket.on("sala_unida", function(data) {
+            localStorage.setItem("sala", data.sala);
+            document.getElementById("salaActual").innerText = data.sala;
+        });
+        
+        socket.on("cartas_repartidas", function(data) {
+            var divCartas = document.getElementById("cartas");
+            divCartas.innerHTML = "";
+            var miMano = data.jugadores[id_jugador]?.mano || [];
+            miMano.forEach(function(carta) {
+                var cartaElemento = document.createElement("div");
+                cartaElemento.innerHTML = carta.Color + " - " + carta.valor;
+                cartaElemento.style.border = "1px solid black";
+                cartaElemento.style.padding = "10px";
+                cartaElemento.style.margin = "5px";
+                cartaElemento.style.display = "inline-block";
+                cartaElemento.style.backgroundColor = carta.Color;
+                divCartas.appendChild(cartaElemento);
+            });
+        });
+        
+        socket.on("mostrar_comenzar", function(data) {
+            document.getElementById("jugadoresCount").innerText = data.jugadores.length;
+            if (data.host === id_jugador && data.jugadores.length > 1) {
+                document.getElementById("botonComenzar").style.display = "block";
+            }
+        });
+        
+        function comenzarJuego() {
+            socket.emit("comenzar_juego", { sala: localStorage.getItem("sala") });
+            document.getElementById("comenzarBtn").style.display = "none";
+        }
+        
+        function mostrarCartaInicial(carta) {
+            if (!carta) return; // Evita errores si no hay carta inicial
+            let cartaElemento = document.getElementById("cartaInicial");
+            cartaElemento.innerHTML = ""; // Limpiar antes de agregar la carta
+        
+            let nuevaCarta = document.createElement("div");
+            nuevaCarta.innerHTML = `${carta.Color} ${carta.valor}`;
+            nuevaCarta.style.backgroundColor = carta.Color === "Negro" ? "#333" : carta.Color;
+            nuevaCarta.style.color = carta.Color === "Negro" ? "#fff" : "#000";
+            nuevaCarta.style.padding = "10px";
+            nuevaCarta.style.border = "1px solid black";
+            cartaElemento.appendChild(nuevaCarta);
+        }
+
+        // **Mostrar la interfaz del juego cuando comienza**
+        socket.on("juego_comenzado", function(data) {
+            localStorage.setItem("juegoActivo", "true");
+            localStorage.setItem("turno", data.turno);
+            localStorage.setItem("host", data.host);
+            localStorage.setItem("cartaInicial", JSON.stringify(data.carta_inicial));
+        
+            mostrarJuego();
+            actualizarEstado();
+            mostrarCartaInicial(data.carta_inicial);
+        });
+        
+       
+        function mostrarJuego() {
+            document.getElementById("configuracionSala").style.display = "none";
+            document.getElementById("partida").style.display = "block";
+        
+            // Si ya hay una carta inicial en el almacenamiento, mostrarla
+            let cartaInicialGuardada = localStorage.getItem("cartaInicial");
+            if (cartaInicialGuardada) {
+                mostrarCartaInicial(JSON.parse(cartaInicialGuardada));
+            }
+        }
+       
+        
+</script>
+</body>
+</html>
